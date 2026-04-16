@@ -1,0 +1,362 @@
+{
+  "name": "Weekly GitHub Activity Summary",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-node",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "weekly-github-summary"
+    },
+    {
+      "parameters": {
+        "resource": "repository",
+        "operation": "get",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}"
+      },
+      "id": "github-repo",
+      "name": "Get Repository Info",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "credentials": {
+        "githubApi": {
+          "id": "github-creds",
+          "name": "GitHub Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "repository",
+        "operation": "getCommits",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "since": "={{ $json.since }}",
+        "until": "={{ $json.until }}",
+        "returnAll": true
+      },
+      "id": "github-commits",
+      "name": "Get Commits",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [650, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "github-creds",
+          "name": "GitHub Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "pullRequest",
+        "operation": "getAll",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "state": "all",
+        "returnAll": true
+      },
+      "id": "github-prs",
+      "name": "Get Pull Requests",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [650, 400],
+      "credentials": {
+        "githubApi": {
+          "id": "github-creds",
+          "name": "GitHub Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "getAll",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "state": "all",
+        "returnAll": true
+      },
+      "id": "github-issues",
+      "name": "Get Issues",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [650, 600],
+      "credentials": {
+        "githubApi": {
+          "id": "github-creds",
+          "name": "GitHub Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "release",
+        "operation": "getAll",
+        "owner": "={{ $json.owner }}",
+        "repository": "={{ $json.repo }}",
+        "returnAll": true
+      },
+      "id": "github-releases",
+      "name": "Get Releases",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [650, 800],
+      "credentials": {
+        "githubApi": {
+          "id": "github-creds",
+          "name": "GitHub Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate GitHub activity data\nconst commits = $input.all()[0].json;\nconst prs = $input.all()[1].json;\nconst issues = $input.all()[2].json;\nconst releases = $input.all()[3].json;\n\n// Calculate date range (last 7 days)\nconst now = new Date();\nconst oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\n// Filter by date range\nconst recentCommits = commits.filter(c => new Date(c.commit.committer.date) >= oneWeekAgo);\nconst recentPRs = prs.filter(pr => new Date(pr.created_at) >= oneWeekAgo || new Date(pr.updated_at) >= oneWeekAgo);\nconst recentIssues = issues.filter(issue => new Date(issue.created_at) >= oneWeekAgo || new Date(issue.updated_at) >= oneWeekAgo);\nconst recentReleases = releases.filter(r => new Date(r.created_at) >= oneWeekAgo);\n\n// Calculate statistics\nconst stats = {\n  commits: {\n    count: recentCommits.length,\n    authors: [...new Set(recentCommits.map(c => c.commit.author.name))],\n    additions: recentCommits.reduce((sum, c) => sum + (c.stats?.additions || 0), 0),\n    deletions: recentCommits.reduce((sum, c) => sum + (c.stats?.deletions || 0), 0)\n  },\n  pullRequests: {\n    opened: recentPRs.filter(pr => new Date(pr.created_at) >= oneWeekAgo && pr.state === 'open').length,\n    merged: recentPRs.filter(pr => pr.merged_at && new Date(pr.merged_at) >= oneWeekAgo).length,\n    closed: recentPRs.filter(pr => pr.closed_at && new Date(pr.closed_at) >= oneWeekAgo && !pr.merged_at).length,\n    contributors: [...new Set(recentPRs.map(pr => pr.user.login))]\n  },\n  issues: {\n    opened: recentIssues.filter(i => new Date(i.created_at) >= oneWeekAgo).length,\n    closed: recentIssues.filter(i => i.closed_at && new Date(i.closed_at) >= oneWeekAgo).length,\n    labels: [...new Set(recentIssues.flatMap(i => i.labels.map(l => l.name)))]\n  },\n  releases: {\n    count: recentReleases.length,\n    latest: recentReleases[0]?.tag_name || null\n  }\n};\n\nreturn [{\n  json: {\n    repository: $input.all()[0].json[0]?.repository?.full_name || 'unknown',\n    weekRange: {\n      start: oneWeekAgo.toISOString(),\n      end: now.toISOString()\n    },\n    stats: stats,\n    rawData: {\n      commits: recentCommits.slice(0, 10),\n      pullRequests: recentPRs.slice(0, 10),\n      issues: recentIssues.slice(0, 10),\n      releases: recentReleases\n    }\n  }\n}];"
+      },
+      "id": "aggregate-data",
+      "name": "Aggregate Activity Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {},
+        "messages": {
+          "message": [
+            {
+              "role": "system",
+              "content": "You are a technical writer creating weekly GitHub activity summaries. Be concise, professional, and highlight key achievements."
+            },
+            {
+              "role": "user",
+              "content": "=Create a weekly summary for {{ $json.repository }}\n\nWeek: {{ $json.weekRange.start }} to {{ $json.weekRange.end }}\n\nStatistics:\n- Commits: {{ $json.stats.commits.count }} ({{ $json.stats.commits.authors.length }} contributors)\n- Lines added: {{ $json.stats.commits.additions }}\n- Lines removed: {{ $json.stats.commits.deletions }}\n- PRs opened: {{ $json.stats.pullRequests.opened }}\n- PRs merged: {{ $json.stats.pullRequests.merged }}\n- Issues opened: {{ $json.stats.issues.opened }}\n- Issues closed: {{ $json.stats.issues.closed }}\n- Releases: {{ $json.stats.releases.count }}\n\nRecent commits:\n{{ JSON.stringify($json.rawData.commits.map(c => c.commit.message.split('\\n')[0])) }}\n\nFormat as a professional weekly summary with sections: Overview, Key Changes, Contributors, and Next Steps."
+            }
+          ]
+        }
+      },
+      "id": "ai-summary",
+      "name": "Generate AI Summary",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1050, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-creds",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format final summary\nconst aiSummary = $input.first().json.choices[0].message.content;\nconst data = $input.all()[1].json;\n\nconst markdownSummary = `# Weekly GitHub Activity Summary\n\n## 📊 ${data.repository}\n\n**Week:** ${new Date(data.weekRange.start).toLocaleDateString()} - ${new Date(data.weekRange.end).toLocaleDateString()}\n\n---\n\n${aiSummary}\n\n---\n\n## 📈 Quick Stats\n\n| Metric | Count |\n|--------|-------|\n| Commits | ${data.stats.commits.count} |\n| Contributors | ${data.stats.commits.authors.length} |\n| Lines Added | +${data.stats.commits.additions} |\n| Lines Removed | -${data.stats.commits.deletions} |\n| PRs Opened | ${data.stats.pullRequests.opened} |\n| PRs Merged | ${data.stats.pullRequests.merged} |\n| Issues Opened | ${data.stats.issues.opened} |\n| Issues Closed | ${data.stats.issues.closed} |\n| Releases | ${data.stats.releases.count} |\n\n---\n\n*Generated by n8n GitHub Activity Workflow*\n`;\n\nreturn [{\n  json: {\n    summary: markdownSummary,\n    repository: data.repository,\n    stats: data.stats,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "format-output",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $json.slackChannel || '#github-activity' }}",
+        "text": "={{ $json.summary }}",
+        "attachments": [],
+        "otherOptions": {}
+      },
+      "id": "slack-post",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1450, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-creds",
+          "name": "Slack Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.fromEmail || 'github-summary@example.com' }}",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "Weekly GitHub Activity Summary - {{ $json.repository }}",
+        "text": "={{ $json.summary }}",
+        "options": {}
+      },
+      "id": "email-send",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1450, 500]
+    },
+    {
+      "parameters": {
+        "fileName": "=/tmp/github-summary-{{ Date.now() }}.md",
+        "data": "={{ $json.summary }}",
+        "options": {}
+      },
+      "id": "file-save",
+      "name": "Save to File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1650, 400]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "errorReporter": "internal",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "timezone": "UTC"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "GitHub",
+      "id": "tag-github"
+    },
+    {
+      "name": "Automation",
+      "id": "tag-automation"
+    },
+    {
+      "name": "Reporting",
+      "id": "tag-reporting"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Repository Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Repository Info": {
+      "main": [
+        [
+          {
+            "node": "Get Commits",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Pull Requests",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Issues",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Releases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Commits": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Activity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pull Requests": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Activity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Issues": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Activity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Releases": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Activity Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Activity Data": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Summary": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
